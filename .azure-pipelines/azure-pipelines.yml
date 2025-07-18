@@ -1,0 +1,44 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  TF_IN_AUTOMATION: true
+
+stages:
+- stage: DeployInfra
+  displayName: "Deploy Infrastructure"
+  jobs:
+  - job: Terraform
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.x'
+
+    - script: |
+        sudo apt-get update && sudo apt-get install -y unzip
+        curl -o terraform.zip https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip
+        unzip terraform.zip && sudo mv terraform /usr/local/bin/
+
+        cd terraform
+        terraform init
+        terraform apply -auto-approve
+      displayName: 'Run Terraform'
+
+- stage: ConfigureVM
+  displayName: "Configure VM with Ansible"
+  dependsOn: DeployInfra
+  jobs:
+  - job: Ansible
+    steps:
+    - script: |
+        sudo apt-get update && sudo apt-get install -y ansible sshpass
+
+        export PUBLIC_IP=$(terraform -chdir=terraform output -raw public_ip_address)
+        echo "[web]" > inventory
+        echo "$PUBLIC_IP ansible_user=azureuser ansible_password='P@ssword1234!' ansible_connection=ssh ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> inventory
+
+        ansible-playbook -i inventory ansible/nginx_install.yml
+      displayName: 'Run Ansible Playbook'
